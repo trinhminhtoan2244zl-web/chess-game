@@ -1,0 +1,8 @@
+{
+  "name": "Chess Game",
+  "description": "A fully featured, responsive interactive chess platform with legal move highlights, game clocks, AI opponents using minimax alpha-beta pruning, custom themes, sound synthesis, and analysis mode.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
