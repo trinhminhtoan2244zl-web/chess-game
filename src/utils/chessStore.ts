@@ -17,7 +17,7 @@ interface ChessState {
   selectedSquare: string | null;
   legalMoves: string[]; // target squares e.g. ['e3', 'e4']
   history: MoveRecord[];
-  futureHistory: MoveRecord[]; // for undo/redo
+  futureHistory: MoveRecord[]; // moves that were undone and can be replayed (redo / time travel)
   lastMove: { from: string; to: string } | null;
   checkSquare: string | null;
   whiteTime: number; // in seconds
@@ -35,6 +35,7 @@ interface ChessState {
   makeAiMove: () => void;
   undoMove: () => void;
   redoMove: () => void;
+  jumpToPly: (ply: number) => void;
   resetGame: () => void;
   updateSettings: (updates: Partial<GameSettings>) => void;
   setMode: (mode: GameMode) => void;
@@ -45,7 +46,7 @@ interface ChessState {
   toggleSound: () => void;
   flipBoard: () => void;
   importFen: (fen: string) => boolean;
-  tickTimer: () => void;
+  tickTimer: (elapsedSeconds?: number) => void;
 }
 
 const DEFAULT_SETTINGS: GameSettings = {
@@ -58,6 +59,16 @@ const DEFAULT_SETTINGS: GameSettings = {
   soundEnabled: true,
   flipped: false,
 };
+
+/** Starting clock value in seconds for the given time control (minutes). */
+function initialSeconds(timeLimit: number | null): number {
+  return timeLimit ? timeLimit * 60 : 600;
+}
+
+/** Increment is only granted from each side's second move onwards (the clock starts after White's first move). */
+function incrementFor(settings: GameSettings, pliesPlayedBeforeMove: number): number {
+  return settings.timeLimit !== null && pliesPlayedBeforeMove >= 2 ? settings.increment : 0;
+}
 
 function getKingSquare(chess: Chess, color: 'w' | 'b'): string | null {
   const board = chess.board();
@@ -75,60 +86,70 @@ function getKingSquare(chess: Chess, color: 'w' | 'b'): string | null {
   return null;
 }
 
+/**
+ * Classifies the current position.
+ * NOTE: chess.js `isDraw()` also returns true for stalemate, so stalemate (and the other
+ * specific draw types) must be tested before falling back to the fifty-move rule.
+ */
+function getPositionStatus(chess: Chess): GameStatus {
+  if (chess.isCheckmate()) return 'checkmate';
+  if (chess.isStalemate()) return 'stalemate';
+  if (chess.isInsufficientMaterial()) return 'draw-insufficient';
+  if (chess.isThreefoldRepetition()) return 'draw-repetition';
+  if (chess.isDraw()) return 'draw-fifty';
+  return 'active';
+}
+
 export const useChessStore = create<ChessState>((set, get) => {
   const initialChess = new Chess();
 
-  const syncStateFromChess = (chess: Chess, isAiMove = false) => {
-    const isGameOver = chess.isGameOver();
-    let status: GameStatus = 'active';
+  // Every scheduled/running AI computation carries the id that was current when it started.
+  // Bumping the id (undo, reset, FEN import, mode change, timeout...) cancels pending AI work.
+  let aiRequestId = 0;
+  const cancelAi = () => {
+    aiRequestId++;
+  };
 
-    if (isGameOver) {
-      if (chess.isCheckmate()) {
-        status = 'checkmate';
+  const scheduleAiMove = () => {
+    const id = ++aiRequestId;
+    setTimeout(() => {
+      if (id === aiRequestId) get().makeAiMove();
+    }, 150);
+  };
+
+  const shouldAiMove = (chess: Chess, status: GameStatus): boolean => {
+    const { settings, futureHistory } = get();
+    return (
+      settings.mode === 'vs-ai' &&
+      chess.turn() === 'b' &&
+      status === 'active' &&
+      futureHistory.length === 0 // do not move while the player is reviewing earlier positions
+    );
+  };
+
+  const syncStateFromChess = (chess: Chess, playSound = true) => {
+    const status = getPositionStatus(chess);
+
+    if (playSound && get().settings.soundEnabled) {
+      if (status === 'checkmate') {
         // Play success tone if user won, else play defeat tone
-        if (get().settings.soundEnabled) {
-          const losingTurn = chess.turn();
-          if (get().settings.mode === 'vs-ai') {
-            if (losingTurn === 'b') {
-              chessAudio.playCheckmate(); // User won!
-            } else {
-              chessAudio.playCheckmateDefeat(); // Computer won
-            }
-          } else {
-            chessAudio.playCheckmate();
-          }
-        }
-      } else if (chess.isDraw()) {
-        if (chess.isInsufficientMaterial()) {
-          status = 'draw-insufficient';
-        } else if (chess.isThreefoldRepetition()) {
-          status = 'draw-repetition';
+        if (get().settings.mode === 'vs-ai' && chess.turn() === 'w') {
+          chessAudio.playCheckmateDefeat(); // Computer won
         } else {
-          status = 'draw-fifty';
+          chessAudio.playCheckmate(); // User won (or local game)
         }
-        if (get().settings.soundEnabled) {
-          chessAudio.playCheckmate();
-        }
-      } else if (chess.isStalemate()) {
-        status = 'stalemate';
-        if (get().settings.soundEnabled) {
-          chessAudio.playCheckmate();
-        }
-      }
-    } else {
-      // Game still active. Play corresponding move sound.
-      if (get().settings.soundEnabled) {
-        if (chess.inCheck()) {
-          chessAudio.playCheck();
+      } else if (status !== 'active') {
+        chessAudio.playCheckmate();
+      } else if (chess.inCheck()) {
+        chessAudio.playCheck();
+      } else {
+        // Check if last move was a capture
+        const historyVerbose = chess.history({ verbose: true });
+        const lastMoveVerbose = historyVerbose[historyVerbose.length - 1];
+        if (lastMoveVerbose && lastMoveVerbose.captured) {
+          chessAudio.playCaptureWithPiece(lastMoveVerbose.piece);
         } else {
-          // Check if last move was a capture
-          const historyVerbose = chess.history({ verbose: true });
-          const lastMoveVerbose = historyVerbose[historyVerbose.length - 1];
-          if (lastMoveVerbose && lastMoveVerbose.captured) {
-            chessAudio.playCaptureWithPiece(lastMoveVerbose.piece);
-          } else {
-            chessAudio.playMove();
-          }
+          chessAudio.playMove();
         }
       }
     }
@@ -159,8 +180,8 @@ export const useChessStore = create<ChessState>((set, get) => {
     futureHistory: [],
     lastMove: null,
     checkSquare: null,
-    whiteTime: 600, // 10 minutes in seconds
-    blackTime: 600,
+    whiteTime: initialSeconds(DEFAULT_SETTINGS.timeLimit),
+    blackTime: initialSeconds(DEFAULT_SETTINGS.timeLimit),
     timerActive: false,
     evaluation: 0,
     bestLine: [],
@@ -172,7 +193,7 @@ export const useChessStore = create<ChessState>((set, get) => {
       if (gameStatus !== 'active' || isAiThinking) return;
 
       // Ensure user plays their color when player turn matches
-      const isPlayerTurn = (settings.mode === 'vs-local' || settings.mode === 'analysis') || 
+      const isPlayerTurn = (settings.mode === 'vs-local' || settings.mode === 'analysis') ||
                            (settings.mode === 'vs-ai' && chess.turn() === 'w');
 
       if (!isPlayerTurn) return;
@@ -183,7 +204,7 @@ export const useChessStore = create<ChessState>((set, get) => {
       }
 
       const piece = chess.get(square as Square);
-      
+
       if (piece && piece.color === chess.turn()) {
         // highlight legal moves for this piece
         const moves = chess.moves({ square: square as Square, verbose: true });
@@ -207,6 +228,9 @@ export const useChessStore = create<ChessState>((set, get) => {
       const { chess, gameStatus, isAiThinking, settings, history, whiteTime, blackTime } = get();
       if (gameStatus !== 'active' || isAiThinking) return false;
 
+      // In AI matches the human always plays White; Black's moves only come from the engine.
+      if (settings.mode === 'vs-ai' && chess.turn() === 'b') return false;
+
       // Double check if move was legal
       try {
         const moves = chess.moves({ verbose: true });
@@ -218,12 +242,18 @@ export const useChessStore = create<ChessState>((set, get) => {
 
         const isPromotion = matchedMove.flags.includes('p');
         const moveParams = isPromotion ? { from, to, promotion } : { from, to };
-        
+
+        const mover = chess.turn();
         const fenBefore = chess.fen();
         const resMove = chess.move(moveParams);
         if (!resMove) return false;
 
         const fenAfter = chess.fen();
+
+        // Clock values AFTER this move (increment goes to the side that just moved)
+        const increment = incrementFor(settings, history.length);
+        const updatedWhiteTime = mover === 'w' ? whiteTime + increment : whiteTime;
+        const updatedBlackTime = mover === 'b' ? blackTime + increment : blackTime;
 
         // Save move record
         const record: MoveRecord = {
@@ -233,23 +263,10 @@ export const useChessStore = create<ChessState>((set, get) => {
           fenBefore,
           fenAfter,
           timeRemaining: {
-            w: whiteTime,
-            b: blackTime,
+            w: updatedWhiteTime,
+            b: updatedBlackTime,
           },
         };
-
-        const activeTurn = chess.turn(); // Turn after move
-        let updatedWhiteTime = whiteTime;
-        let updatedBlackTime = blackTime;
-
-        // Apply increment to the player who just completed their turn (opposite of activeTurn)
-        if (settings.timeLimit !== null && history.length > 1) {
-          if (activeTurn === 'b') {
-            updatedWhiteTime += settings.increment;
-          } else {
-            updatedBlackTime += settings.increment;
-          }
-        }
 
         const synced = syncStateFromChess(chess);
 
@@ -264,10 +281,8 @@ export const useChessStore = create<ChessState>((set, get) => {
         });
 
         // Trigger AI opponent if in vs-ai mode and it is Black's turn
-        if (settings.mode === 'vs-ai' && chess.turn() === 'b' && synced.gameStatus === 'active') {
-          setTimeout(() => {
-            get().makeAiMove();
-          }, 150);
+        if (shouldAiMove(chess, synced.gameStatus)) {
+          scheduleAiMove();
         }
 
         return true;
@@ -279,8 +294,11 @@ export const useChessStore = create<ChessState>((set, get) => {
     },
 
     makeAiMove: () => {
-      const { chess, gameStatus, settings, history, whiteTime, blackTime } = get();
+      const { chess, gameStatus, settings, futureHistory } = get();
       if (gameStatus !== 'active' || chess.turn() !== 'b' || settings.mode !== 'vs-ai') return;
+      if (futureHistory.length > 0) return;
+
+      const requestId = aiRequestId;
 
       // Set AI thinking animation
       set({ isAiThinking: true });
@@ -289,22 +307,29 @@ export const useChessStore = create<ChessState>((set, get) => {
       const thinkingDelay = Math.min(2200, Math.max(700, 1500 - (100 * Math.random())));
 
       setTimeout(() => {
-        const { chess: currentChess } = get();
-        if (currentChess.turn() !== 'b' || get().gameStatus !== 'active') {
+        // Cancelled (undo / reset / import / timeout): whoever cancelled already reset isAiThinking.
+        if (requestId !== aiRequestId) return;
+
+        // Always read fresh state: the clock kept running while the engine was "thinking".
+        const state = get();
+        const currentChess = state.chess;
+        if (currentChess.turn() !== 'b' || state.gameStatus !== 'active') {
           set({ isAiThinking: false });
           return;
         }
 
         try {
           // Gather complete PGN history in SAN form to guide the opening book
-          const historySan = history.map((h) => h.san);
-          const aiResult = getBestMove(currentChess, settings.difficulty, historySan);
+          const historySan = state.history.map((h) => h.san);
+          const aiResult = getBestMove(currentChess, state.settings.difficulty, historySan);
 
           const fenBefore = currentChess.fen();
           const resMove = currentChess.move(aiResult.move);
 
           if (resMove) {
             const fenAfter = currentChess.fen();
+
+            const updatedBlackTime = state.blackTime + incrementFor(state.settings, state.history.length);
             const record: MoveRecord = {
               san: resMove.san,
               from: resMove.from,
@@ -312,21 +337,21 @@ export const useChessStore = create<ChessState>((set, get) => {
               fenBefore,
               fenAfter,
               timeRemaining: {
-                w: whiteTime,
-                b: blackTime,
+                w: state.whiteTime,
+                b: updatedBlackTime,
               },
             };
 
-            const updatedBlackTime = settings.timeLimit !== null ? blackTime + settings.increment : blackTime;
-            const synced = syncStateFromChess(currentChess, true);
+            const synced = syncStateFromChess(currentChess);
 
             set({
               ...synced,
               isAiThinking: false,
-              history: [...get().history, record],
+              history: [...state.history, record],
+              futureHistory: [],
               lastMove: { from: resMove.from, to: resMove.to },
               blackTime: updatedBlackTime,
-              timerActive: synced.gameStatus === 'active' && settings.timeLimit !== null,
+              timerActive: synced.gameStatus === 'active' && state.settings.timeLimit !== null,
             });
           } else {
             set({ isAiThinking: false });
@@ -339,66 +364,65 @@ export const useChessStore = create<ChessState>((set, get) => {
     },
 
     undoMove: () => {
-      const { chess, history, futureHistory, settings } = get();
+      const { history, settings } = get();
       if (history.length === 0) return;
 
-      // If in vs-ai, undo TWO moves (both AI and User) to keep player's turn,
-      // unless there's only 1 move (AI shouldn't have made a move yet as White).
-      let movesToUndo = 1;
-      if (settings.mode === 'vs-ai' && history.length >= 2) {
-        movesToUndo = 2;
+      let target = history.length - 1;
+
+      // In AI matches undo until it is the human's (White's) turn again, so both the
+      // engine's reply and the human's move are taken back (and a pending AI move is cancelled).
+      if (settings.mode === 'vs-ai') {
+        const turnAfterPly = (ply: number): string =>
+          (ply === 0 ? history[0].fenBefore : history[ply - 1].fenAfter).split(' ')[1];
+        while (target > 0 && turnAfterPly(target) !== 'w') target--;
       }
 
-      const tempHistory = [...history];
-      const tempFuture = [...futureHistory];
-
-      for (let i = 0; i < movesToUndo; i++) {
-        if (tempHistory.length === 0) break;
-        const undoneRecord = tempHistory.pop()!;
-        tempFuture.unshift(undoneRecord);
-        chess.undo();
-      }
-
-      const lastRecord = tempHistory[tempHistory.length - 1] || null;
-      const synced = syncStateFromChess(chess);
-
-      if (settings.soundEnabled) {
-        chessAudio.playMove();
-      }
-
-      set({
-        ...synced,
-        history: tempHistory,
-        futureHistory: tempFuture,
-        lastMove: lastRecord ? { from: lastRecord.from, to: lastRecord.to } : null,
-        whiteTime: lastRecord?.timeRemaining?.w ?? (settings.timeLimit ? settings.timeLimit * 60 : 600),
-        blackTime: lastRecord?.timeRemaining?.b ?? (settings.timeLimit ? settings.timeLimit * 60 : 600),
-        timerActive: synced.gameStatus === 'active' && settings.timeLimit !== null && tempHistory.length > 0,
-      });
+      get().jumpToPly(target);
     },
 
     redoMove: () => {
-      const { chess, history, futureHistory, settings, whiteTime, blackTime } = get();
+      const { history, futureHistory, settings } = get();
       if (futureHistory.length === 0) return;
 
-      let movesToRedo = 1;
-      // In VS AI mode, redo both player's move and AI's answer
+      let target = history.length + 1;
+
+      // In AI matches redo both the human's move and the engine's answer
       if (settings.mode === 'vs-ai' && futureHistory.length >= 2) {
-        movesToRedo = 2;
+        const turnAfterFirst = futureHistory[0].fenAfter.split(' ')[1];
+        if (turnAfterFirst === 'b') target++;
       }
 
-      const tempHistory = [...history];
-      const tempFuture = [...futureHistory];
+      get().jumpToPly(target);
+    },
 
-      for (let i = 0; i < movesToRedo; i++) {
-        if (tempFuture.length === 0) break;
-        const toRedoRecord = tempFuture.shift()!;
-        chess.move(toRedoRecord.san);
-        tempHistory.push(toRedoRecord);
+    /**
+     * Non-destructive time travel: moves the board to the position after `ply` half-moves.
+     * Moves after that point are kept in `futureHistory` so they can be replayed
+     * (undo / redo buttons, or clicking a move in the move log).
+     */
+    jumpToPly: (ply) => {
+      const { chess, history, futureHistory, settings } = get();
+      const all = [...history, ...futureHistory];
+      const target = Math.max(0, Math.min(all.length, Math.floor(ply)));
+      if (target === history.length) return;
+
+      cancelAi();
+
+      let applied = history.length;
+      while (applied > target) {
+        chess.undo();
+        applied--;
+      }
+      while (applied < target) {
+        chess.move(all[applied].san);
+        applied++;
       }
 
-      const lastRecord = tempHistory[tempHistory.length - 1];
-      const synced = syncStateFromChess(chess);
+      const newHistory = all.slice(0, target);
+      const newFuture = all.slice(target);
+      const lastRecord = newHistory[newHistory.length - 1] || null;
+      const base = initialSeconds(settings.timeLimit);
+      const synced = syncStateFromChess(chess, false);
 
       if (settings.soundEnabled) {
         chessAudio.playMove();
@@ -406,20 +430,31 @@ export const useChessStore = create<ChessState>((set, get) => {
 
       set({
         ...synced,
-        history: tempHistory,
-        futureHistory: tempFuture,
-        lastMove: { from: lastRecord.from, to: lastRecord.to },
-        whiteTime: lastRecord.timeRemaining?.w ?? whiteTime,
-        blackTime: lastRecord.timeRemaining?.b ?? blackTime,
-        timerActive: synced.gameStatus === 'active' && settings.timeLimit !== null,
+        isAiThinking: false,
+        history: newHistory,
+        futureHistory: newFuture,
+        lastMove: lastRecord ? { from: lastRecord.from, to: lastRecord.to } : null,
+        whiteTime: lastRecord?.timeRemaining?.w ?? base,
+        blackTime: lastRecord?.timeRemaining?.b ?? base,
+        // The clock is paused while looking at earlier positions and resumes at the live position
+        timerActive:
+          synced.gameStatus === 'active' &&
+          settings.timeLimit !== null &&
+          newHistory.length > 0 &&
+          newFuture.length === 0,
       });
+
+      if (shouldAiMove(chess, synced.gameStatus)) {
+        scheduleAiMove();
+      }
     },
 
     resetGame: () => {
       const { settings } = get();
       const freshChess = new Chess();
-      const prepSeconds = settings.timeLimit ? settings.timeLimit * 60 : 600;
+      const prepSeconds = initialSeconds(settings.timeLimit);
 
+      cancelAi();
       chessAudio.playCheck(); // play start sound
       set({
         chess: freshChess,
@@ -447,7 +482,7 @@ export const useChessStore = create<ChessState>((set, get) => {
 
         // Adjust timers if time limits changed
         if (updates.timeLimit !== undefined) {
-          const prepSeconds = updates.timeLimit ? updates.timeLimit * 60 : 600;
+          const prepSeconds = initialSeconds(updates.timeLimit);
           outputState.whiteTime = prepSeconds;
           outputState.blackTime = prepSeconds;
           outputState.timerActive = false;
@@ -462,15 +497,27 @@ export const useChessStore = create<ChessState>((set, get) => {
       });
     },
 
+    // Switching mode keeps the current position; the engine takes over if it is Black's turn.
     setMode: (mode) => {
-      get().updateSettings({ mode });
-      get().resetGame();
+      cancelAi();
+      set((state) => ({
+        settings: { ...state.settings, mode },
+        isAiThinking: false,
+        selectedSquare: null,
+        legalMoves: [],
+      }));
+
+      const { chess, gameStatus } = get();
+      if (shouldAiMove(chess, gameStatus)) {
+        scheduleAiMove();
+      }
     },
 
     setDifficulty: (difficulty) => {
       get().updateSettings({ difficulty });
     },
 
+    // A new time control means a fresh game with fresh clocks
     setTimeLimit: (minutes) => {
       get().updateSettings({ timeLimit: minutes });
       get().resetGame();
@@ -498,28 +545,31 @@ export const useChessStore = create<ChessState>((set, get) => {
       const { settings } = get();
       try {
         const testChess = new Chess(fenString);
-        
+
         // FEN is parsed successfully
-        const prepSeconds = settings.timeLimit ? settings.timeLimit * 60 : 600;
-        const synced = syncStateFromChess(testChess);
+        cancelAi();
+        const prepSeconds = initialSeconds(settings.timeLimit);
+        const synced = syncStateFromChess(testChess, false);
 
         set({
           chess: testChess,
-          fen: testChess.fen(),
-          gameStatus: synced.gameStatus,
-          checkSquare: synced.checkSquare,
-          evaluation: synced.evaluation,
-          selectedSquare: null,
-          legalMoves: [],
+          ...synced,
+          isAiThinking: false,
           history: [], // Reset transaction history for FEN imports
           futureHistory: [],
           lastMove: null,
           whiteTime: prepSeconds,
           blackTime: prepSeconds,
           timerActive: false,
+          bestLine: [],
         });
-        
+
         if (settings.soundEnabled) chessAudio.playCheck();
+
+        // The imported position may have Black to move: let the engine play it in AI matches
+        if (shouldAiMove(testChess, synced.gameStatus)) {
+          scheduleAiMove();
+        }
         return true;
       } catch (e) {
         console.error('Invalid FEN imported', e);
@@ -528,24 +578,31 @@ export const useChessStore = create<ChessState>((set, get) => {
       }
     },
 
-    tickTimer: () => {
+    // `elapsedSeconds` is the real time since the previous tick, so the clock stays accurate
+    // even if the browser throttles timers in a background tab.
+    tickTimer: (elapsedSeconds = 1) => {
       const { timerActive, gameStatus, chess, whiteTime, blackTime, settings } = get();
       if (!timerActive || gameStatus !== 'active' || settings.timeLimit === null) return;
 
       const activeTurn = chess.turn();
+      const nextTime = Math.max(0, (activeTurn === 'w' ? whiteTime : blackTime) - elapsedSeconds);
+
       if (activeTurn === 'w') {
-        const nextTime = Math.max(0, whiteTime - 1);
         set({ whiteTime: nextTime });
-        if (nextTime === 0) {
-          set({ gameStatus: 'timeout-w', timerActive: false });
-          if (settings.soundEnabled) chessAudio.playCheckmateDefeat();
-        }
       } else {
-        const nextTime = Math.max(0, blackTime - 1);
         set({ blackTime: nextTime });
-        if (nextTime === 0) {
-          set({ gameStatus: 'timeout-b', timerActive: false });
-          if (settings.soundEnabled) chessAudio.playCheckmate();
+      }
+
+      if (nextTime === 0) {
+        cancelAi();
+        set({
+          gameStatus: activeTurn === 'w' ? 'timeout-w' : 'timeout-b',
+          timerActive: false,
+          isAiThinking: false,
+        });
+        if (settings.soundEnabled) {
+          if (activeTurn === 'w') chessAudio.playCheckmateDefeat();
+          else chessAudio.playCheckmate();
         }
       }
     },

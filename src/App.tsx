@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import Chessboard from './components/Chessboard';
 import Timer from './components/Timer';
 import MoveHistory from './components/MoveHistory';
@@ -16,11 +16,8 @@ import {
   Sun,
   Moon,
   HelpCircle,
-  GitBranch,
-  Crown,
   Cpu,
   User,
-  AlertTriangle,
   Play,
   RotateCcw,
 } from 'lucide-react';
@@ -39,7 +36,22 @@ export default function App() {
 
   // Auto-toggles timer activation when any move is played
   const timerActive = useChessStore((state) => state.timerActive);
-  const startTimer = useChessStore((state) => state.updateSettings);
+  const tickTimer = useChessStore((state) => state.tickTimer);
+
+  // The one and only clock interval. It reports the real elapsed time on every tick, so the clock
+  // stays correct even when the browser throttles timers (e.g. in a background tab).
+  useEffect(() => {
+    if (!timerActive) return;
+
+    let last = performance.now();
+    const intervalId = setInterval(() => {
+      const now = performance.now();
+      tickTimer((now - last) / 1000);
+      last = now;
+    }, 500);
+
+    return () => clearInterval(intervalId);
+  }, [timerActive, tickTimer]);
 
   const handleStartGameWithClock = () => {
     // Triggers timer activation
@@ -53,11 +65,7 @@ export default function App() {
   // Get current visual mood colors
   const moodBg = isDarkMode
     ? 'bg-gradient-to-br from-neutral-950 via-zinc-900 to-stone-950 text-white'
-    : 'bg-gradient-to-br from-slate-50 via-slate-100 to-[#eceff1] text-neutral-905';
-
-  const cardBg = isDarkMode
-    ? 'bg-neutral-900/60 border border-neutral-800/80'
-    : 'bg-white border border-slate-205/80 shadow';
+    : 'bg-gradient-to-br from-slate-50 via-slate-100 to-[#eceff1] text-neutral-900';
 
   const textPrimary = isDarkMode ? 'text-white' : 'text-neutral-900';
   const textSecondary = isDarkMode ? 'text-neutral-400' : 'text-neutral-600';
@@ -215,7 +223,7 @@ export default function App() {
               <CapturedPieces color="b" />
             </div>
             
-            {/* Start match countdown flag if untimed clock */}
+            {/* Optionally start the countdown before the first move is played */}
             {!timerActive && settings.timeLimit !== null && history.length === 0 && (
               <button
                 onClick={handleStartGameWithClock}
@@ -315,7 +323,7 @@ export default function App() {
 
       {/* GLOBAL FOOTER */}
       <footer className={`py-6 mt-auto text-center border-t text-xs select-none ${
-        isDarkMode ? 'border-neutral-900 text-neutral-600' : 'border-slate-250 text-neutral-500'
+        isDarkMode ? 'border-neutral-900 text-neutral-600' : 'border-slate-200 text-neutral-500'
       }`}>
         <p className="font-semibold uppercase tracking-widest text-[9px]">
           Chess Grandmaster Platform • Designed in React & TypeScript

@@ -9,18 +9,22 @@ import { MoveRecord } from '../types';
 import { Copy, Check, Download } from 'lucide-react';
 
 export default function MoveHistory() {
-  const { history, importFen, chess, settings } = useChessStore();
+  const { history, futureHistory, jumpToPly, isAiThinking } = useChessStore();
   const [copiedPgn, setCopiedPgn] = React.useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Moves that were taken back stay visible (dimmed) so the player can travel forward again
+  const allMoves = [...history, ...futureHistory];
+  const currentPly = history.length;
+
   // Group linear history into pairs [[move1_w, move1_b], [move2_w, move2_b], ...]
   const groupedMoves: { num: number; w?: MoveRecord; b?: MoveRecord }[] = [];
-  
-  for (let i = 0; i < history.length; i += 2) {
+
+  for (let i = 0; i < allMoves.length; i += 2) {
     groupedMoves.push({
       num: Math.floor(i / 2) + 1,
-      w: history[i],
-      b: history[i + 1],
+      w: allMoves[i],
+      b: allMoves[i + 1],
     });
   }
 
@@ -29,7 +33,7 @@ export default function MoveHistory() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [history.length]);
+  }, [allMoves.length]);
 
   // Generate real standard PGN string
   const getPgnString = () => {
@@ -59,11 +63,20 @@ export default function MoveHistory() {
     document.body.removeChild(element);
   };
 
-  // Inspect FEN state of a past move
-  const handleInspectMove = (fen: string) => {
-    // Import FEN temporarily
-    importFen(fen);
+  // Time travel: go to the position right after the given half-move (ply).
+  // Non-destructive: later moves stay in the log and can be replayed.
+  const handleInspectMove = (ply: number) => {
+    jumpToPly(ply);
   };
+
+  const moveButtonClass = (ply: number) =>
+    `col-span-5 text-left px-2 font-medium rounded cursor-pointer transition-all truncate ${
+      ply === currentPly
+        ? 'bg-indigo-500/25 text-indigo-300'
+        : ply > currentPly
+        ? 'text-neutral-600 hover:text-indigo-400 hover:bg-indigo-500/10'
+        : 'hover:text-indigo-400 hover:bg-indigo-500/10'
+    }`;
 
   return (
     <div className="flex flex-col h-full bg-neutral-900/40 border border-neutral-800/60 rounded-xl overflow-hidden backdrop-blur-md">
@@ -73,7 +86,7 @@ export default function MoveHistory() {
           <span className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse"></span>
           Move Log
         </h3>
-        {history.length > 0 && (
+        {allMoves.length > 0 && (
           <div className="flex items-center gap-1.5">
             <button
               onClick={handleCopyPgn}
@@ -110,7 +123,7 @@ export default function MoveHistory() {
       >
         {groupedMoves.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-neutral-500 text-center py-10 scale-95 select-none">
-            <div className="p-4 bg-neutral-850 rounded-full mb-3 border border-neutral-800 text-neutral-600 font-mono text-xl">♟</div>
+            <div className="p-4 bg-neutral-800 rounded-full mb-3 border border-neutral-800 text-neutral-600 font-mono text-xl">♟</div>
             <p className="text-xs">Waiting for first move...</p>
             <p className="text-[10px] text-neutral-600 mt-1">Play White to start the game.</p>
           </div>
@@ -128,8 +141,8 @@ export default function MoveHistory() {
                 
                 {/* White Move */}
                 <button
-                  onClick={() => g.w && handleInspectMove(g.w.fenAfter)}
-                  className="col-span-5 text-left px-2 font-medium hover:text-indigo-400 hover:bg-indigo-500/10 rounded cursor-pointer transition-all truncate"
+                  onClick={() => handleInspectMove(idx * 2 + 1)}
+                  className={moveButtonClass(idx * 2 + 1)}
                 >
                   {g.w?.san}
                 </button>
@@ -137,13 +150,15 @@ export default function MoveHistory() {
                 {/* Black Move */}
                 {g.b ? (
                   <button
-                    onClick={() => g.b && handleInspectMove(g.b.fenAfter)}
-                    className="col-span-5 text-left px-2 font-medium hover:text-indigo-400 hover:bg-indigo-500/10 rounded cursor-pointer transition-all truncate"
+                    onClick={() => handleInspectMove(idx * 2 + 2)}
+                    className={moveButtonClass(idx * 2 + 2)}
                   >
-                    {g.b?.san}
+                    {g.b.san}
                   </button>
                 ) : (
-                  <span className="col-span-5 text-neutral-600 px-2 italic text-[10px]">Thinking...</span>
+                  <span className="col-span-5 text-neutral-600 px-2 italic text-[10px]">
+                    {isAiThinking ? 'Thinking...' : ''}
+                  </span>
                 )}
               </div>
             ))}
@@ -154,7 +169,7 @@ export default function MoveHistory() {
       {/* Footer Instructions */}
       <div className="px-4 py-2 bg-neutral-900 border-t border-neutral-800 flex justify-between items-center text-[10px] text-neutral-500 select-none">
         <span>Click on any move to travel in time</span>
-        <span className="font-mono text-neutral-600">{`Moves: ${history.length}`}</span>
+        <span className="font-mono text-neutral-600">{`Moves: ${currentPly}/${allMoves.length}`}</span>
       </div>
     </div>
   );

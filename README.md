@@ -11,7 +11,7 @@ A full-featured, responsive, and beautifully designed tactical Chess application
 - ⏱️ **Integrated Chess Clocks**: Bullet, Blitz, Rapid, and Classical custom duration timers with increments, automated turn switching, and low-time warning buzzers.
 - 🎨 **Visual Board Styles**: Six custom vector board textures including Classic Wood, Chess.com Green, Cobalt glass, Noble Slate, Futuristic Glass, and Synthwave Neon.
 - 🔊 **Dynamic Sound Synthesis**: Move acoustic feedback synthesized in real-time using the browser's native **Web Audio API** (wood plucks, capture clicks, check tones, and victory chimes).
-- 🕒 **Move Notation & Time Travel**: Clickable move log (algebraic SAN notation) with Copy/Download PGN capabilities, allowing players to navigate back and review past board states.
+- 🕒 **Move Notation & Time Travel**: Clickable move log (algebraic SAN notation) with Copy/Download PGN capabilities, allowing players to navigate back and forward through the game without losing any moves (the clock pauses while reviewing).
 - 🔍 **Real-Time Analysis Mode**: Embedded evaluation bar indicating the positional advantage of White vs. Black, plus instant engine recommendations.
 - ⚙️ **Premium Controls**: Drag-and-drop movement, click-to-move touch capabilities, interactive pawn promotions, board flips, board state FEN importing, and light/dark theme toggles.
 
@@ -20,10 +20,11 @@ A full-featured, responsive, and beautifully designed tactical Chess application
 ## 📁 Architecture & File Structure
 
 ```
-├── .env.example            # Sample configuration variables
+├── .gitignore              # Ignored files (node_modules, dist, .env)
 ├── README.md               # User manual and project documentation
 ├── index.html              # Core client HTML template
-├── metadata.json           # App permissions and global properties
+├── metadata.json           # App metadata (AI Studio)
+├── vite.config.ts          # Vite + React + Tailwind configuration
 ├── package.json            # Task commands & npm dependency manifests
 ├── src/
 │   ├── App.tsx             # Interactive layout & game state manager
@@ -35,7 +36,7 @@ A full-featured, responsive, and beautifully designed tactical Chess application
 │   │   ├── ChessPieces.tsx # Ultra-crisp modern SVG game pieces
 │   │   ├── CapturedPieces.tsx # Captured count tallies & material indicators
 │   │   ├── MoveHistory.tsx    # Clickable move logs with PGN features
-│   │   ├── Timer.tsx          # Dual-active countdown play clocks
+│   │   ├── Timer.tsx          # Clock faces (the single tick interval lives in App.tsx)
 │   │   ├── GameControls.tsx   # Settings panels & FEN importers
 │   │   └── AnalysisPanel.tsx  # Advantage assessment bar & recommendations
 │   └── utils/
@@ -68,7 +69,14 @@ npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) in your web browser to play!
 
-### 3. Build & Package for Production
+No environment variables or API keys are required: everything (rules, AI engine, sounds) runs in the browser.
+
+### 3. Type-check (optional)
+```bash
+npm run lint
+```
+
+### 4. Build & Package for Production
 Compile code down to high-performance standalone files within `/dist` ready for hosting:
 ```bash
 npm run build

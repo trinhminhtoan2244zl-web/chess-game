@@ -9,11 +9,13 @@ import { getBestMove } from '../utils/aiEngine';
 import { Sparkles, BarChart2 } from 'lucide-react';
 
 export default function AnalysisPanel() {
-  const { chess, evaluation, gameStatus, settings } = useChessStore();
+  const { chess, fen, history, evaluation, gameStatus } = useChessStore();
   const [bestMoveText, setBestMoveText] = useState<string>('Computing...');
   const [bestMoveScore, setBestMoveScore] = useState<number>(0);
 
-  // Re-calculate engine analysis recommendation when board FEN updates
+  // Re-calculate engine analysis recommendation whenever the position changes.
+  // `chess` is a mutable object whose identity never changes while moves are played,
+  // so the FEN string is what actually tells us that the board is different.
   useEffect(() => {
     if (gameStatus !== 'active') {
       setBestMoveText('Game Over');
@@ -23,7 +25,8 @@ export default function AnalysisPanel() {
     setBestMoveText('Analyzing...');
     const timer = setTimeout(() => {
       try {
-        const result = getBestMove(chess, 'hard'); // Engine suggests moves with its 'hard' level depth
+        const historySan = history.map((h) => h.san);
+        const result = getBestMove(chess, 'hard', historySan); // Engine suggests moves with its 'hard' level depth
         setBestMoveText(result.move);
         setBestMoveScore(result.score / 100);
       } catch (e) {
@@ -32,7 +35,7 @@ export default function AnalysisPanel() {
     }, 450); // Small debounce to avoid lagging during fast manual moves
 
     return () => clearTimeout(timer);
-  }, [chess, gameStatus]);
+  }, [chess, fen, history, gameStatus]);
 
   // Map evaluation value (clamped between -8 and +8) to percentage height for the evaluation bar
   // +8 (White winning) => 100% White
