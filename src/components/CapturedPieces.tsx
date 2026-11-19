@@ -49,6 +49,14 @@ export default function CapturedPieces({ color }: CapturedPiecesProps) {
       }
     }
 
+    // A promoted pawn left the pawn count but was not captured: count each extra
+    // knight/bishop/rook/queen as a pawn that is still alive.
+    for (const side of ['w', 'b'] as const) {
+      for (const type of ['n', 'b', 'r', 'q'] as const) {
+        active[side].p += Math.max(0, active[side][type] - initial[side][type]);
+      }
+    }
+
     const capturedW: string[] = []; // White pieces captured (held by Black)
     const capturedB: string[] = []; // Black pieces captured (held by White)
 
@@ -95,7 +103,7 @@ export default function CapturedPieces({ color }: CapturedPiecesProps) {
   if (capturedToShow.length === 0) return <div className="h-4" />;
 
   return (
-    <div className="flex items-center gap-1.5 py-1 px-2 bg-neutral-850/50 rounded-lg border border-neutral-800/40 text-xs text-neutral-400 select-none max-w-max">
+    <div className="flex items-center gap-1.5 py-1 px-2 bg-neutral-800/50 rounded-lg border border-neutral-800/40 text-xs text-neutral-400 select-none max-w-max">
       <div className="flex items-center -space-x-1 overflow-hidden">
         {capturedToShow.map((type, idx) => (
           <span

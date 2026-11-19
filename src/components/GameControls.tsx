@@ -13,18 +13,15 @@ import {
   Redo2,
   Volume2,
   VolumeX,
-  FileCheck2,
   Key,
   Flame,
   LayoutGrid,
   Trophy,
   Sliders,
-  Sparkles,
 } from 'lucide-react';
 
 export default function GameControls() {
   const {
-    chess,
     fen,
     history,
     futureHistory,
@@ -35,6 +32,8 @@ export default function GameControls() {
     flipBoard,
     toggleSound,
     updateSettings,
+    setMode,
+    setTimeLimit,
     importFen,
   } = useChessStore();
 
@@ -76,7 +75,7 @@ export default function GameControls() {
           {/* Restart */}
           <button
             onClick={resetGame}
-            className="flex items-center justify-center gap-2 p-2.5 bg-neutral-800 hover:bg-neutral-700/80 active:scale-95 text-white border border-neutral-700 rounded-xl font-medium text-xs sm:text-sm shadowtransition-all cursor-pointer"
+            className="flex items-center justify-center gap-2 p-2.5 bg-neutral-800 hover:bg-neutral-700/80 active:scale-95 text-white border border-neutral-700 rounded-xl font-medium text-xs sm:text-sm shadow transition-all cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" />
             Restart Chess
@@ -145,7 +144,7 @@ export default function GameControls() {
             ].map((m) => (
               <button
                 key={m.id}
-                onClick={() => updateSettings({ mode: m.id as GameMode })}
+                onClick={() => setMode(m.id as GameMode)}
                 className={`py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
                   settings.mode === m.id
                     ? 'bg-indigo-600 text-white shadow-md font-semibold'
@@ -162,7 +161,7 @@ export default function GameControls() {
         {settings.mode === 'vs-ai' && (
           <div className="flex flex-col gap-1 transition-all">
             <label className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider">AI Thinking Level</label>
-            <div className="grid grid-cols-4 gap-1   p-1 bg-black/25 rounded-md border border-neutral-805">
+            <div className="grid grid-cols-4 gap-1 p-1 bg-black/25 rounded-md border border-neutral-800">
               {[
                 { id: 'easy', label: 'Easy' },
                 { id: 'medium', label: 'Medium' },
@@ -198,7 +197,7 @@ export default function GameControls() {
             ].map((t, idx) => (
               <button
                 key={idx}
-                onClick={() => updateSettings({ timeLimit: t.val })}
+                onClick={() => setTimeLimit(t.val)}
                 className={`py-1 px-1 bg-neutral-800 hover:bg-neutral-700/80 active:bg-neutral-600/85 text-[11px] font-medium rounded border border-neutral-700 text-center transition-colors cursor-pointer ${
                   settings.timeLimit === t.val
                     ? 'bg-indigo-600 text-white font-semibold shadow-md'

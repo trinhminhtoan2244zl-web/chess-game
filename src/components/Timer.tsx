@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { useChessStore } from '../utils/chessStore';
 import { User, Cpu, AlertTriangle } from 'lucide-react';
 
@@ -11,37 +11,24 @@ interface TimerProps {
   playerColor: 'w' | 'b';
 }
 
+// NOTE: the clock itself is driven by a single interval in App.tsx. Two <Timer/> components are
+// mounted at the same time (White and Black), so each of them must NOT start its own interval,
+// otherwise the active clock would run twice as fast.
 export default function Timer({ playerColor }: TimerProps) {
   const {
     chess,
     whiteTime,
     blackTime,
-    timerActive,
     settings,
-    tickTimer,
   } = useChessStore();
-
-  // Root level clock intervals to coordinate ticks
-  useEffect(() => {
-    let intervalId: NodeJS.Timeout | null = null;
-    
-    if (timerActive) {
-      intervalId = setInterval(() => {
-        tickTimer();
-      }, 1000);
-    }
-
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [timerActive, tickTimer]);
 
   const timeInSeconds = playerColor === 'w' ? whiteTime : blackTime;
   const isTurn = chess.turn() === playerColor;
 
-  // Format time as MM:SS
-  const formatTime = (totalSecs: number) => {
+  // Format time as MM:SS (the stored value can be fractional, so round up to whole seconds)
+  const formatTime = (rawSecs: number) => {
     if (settings.timeLimit === null) return '∞';
+    const totalSecs = Math.ceil(rawSecs);
     const mins = Math.floor(totalSecs / 60);
     const secs = totalSecs % 60;
     const formattedSecs = secs < 10 ? `0${secs}` : secs;
@@ -66,7 +53,7 @@ export default function Timer({ playerColor }: TimerProps) {
   const name = playerColor === 'w' ? 'White Player' : 
                settings.mode === 'vs-ai' ? getDifficultyLabel() : 'Black Player';
 
-  const isLowTime = timeInSeconds > 0 && timeInSeconds <= 30;
+  const isLowTime = timeInSeconds > 0 && Math.ceil(timeInSeconds) <= 30;
 
   return (
     <div

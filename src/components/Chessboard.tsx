@@ -85,7 +85,7 @@ export default function Chessboard() {
   const getComicLabel = (capturer: string) => {
     switch (capturer.toLowerCase()) {
       case 'r': return { text: 'XE GẦM RÚ! 🚜', style: 'from-amber-500 via-orange-500 to-red-600 border-amber-400 text-white shadow-[0_0_12px_rgba(249,115,22,0.6)]' };
-      case 'b': return { text: 'VOI GẦM SẤM! 🐘', style: 'from-cyan-500 via-sky-505 to-indigo-600 border-cyan-400 text-white shadow-[0_0_12px_rgba(34,211,238,0.6)]' };
+      case 'b': return { text: 'VOI GẦM SẤM! 🐘', style: 'from-cyan-500 via-sky-500 to-indigo-600 border-cyan-400 text-white shadow-[0_0_12px_rgba(34,211,238,0.6)]' };
       case 'n': return { text: 'MÃ HÍ! 🐴', style: 'from-emerald-400 via-teal-500 to-emerald-600 border-emerald-400 text-white shadow-[0_0_12px_rgba(16,185,129,0.6)]' };
       case 'q': return { text: 'HẬU PHÉP THUẬT! ⚡', style: 'from-fuchsia-400 via-purple-600 to-pink-600 border-fuchsia-400 text-white shadow-[0_0_12px_rgba(217,70,239,0.6)]' };
       case 'k': return { text: 'THIÊN VƯƠNG! 👑', style: 'from-rose-500 via-red-500 to-amber-500 border-rose-400 text-white shadow-[0_0_12px_rgba(244,63,94,0.6)]' };
@@ -350,7 +350,7 @@ export default function Chessboard() {
           <div className="bg-neutral-900 border border-neutral-700 p-5 rounded-2xl shadow-2xl max-w-xs text-center">
             <h3 className="text-white text-base font-bold mb-4 tracking-wide">Pawn Promotion</h3>
             <p className="text-neutral-400 text-xs mb-5">Choose a piece to promote your pawn to:</p>
-            <div className="grid grid-cols-4 gap-3 bg-neutral-850 p-2.5 rounded-xl border border-neutral-800">
+            <div className="grid grid-cols-4 gap-3 bg-neutral-800 p-2.5 rounded-xl border border-neutral-800">
               {['q', 'n', 'r', 'b'].map((pieceCode) => {
                 const PieceIcon = getPieceComponent(pieceCode, chess.turn());
                 return (

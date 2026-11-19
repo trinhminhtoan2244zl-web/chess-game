@@ -145,19 +145,30 @@ function isEndgame(chess: Chess): boolean {
   return heavyPieces <= 4;
 }
 
+const MATE_SCORE = 100000;
+
 /**
- * Main evaluation function.
+ * Main evaluation function (used by the UI evaluation bar).
  * Evaluates board position from White's perspective (+ means White is winning, - means Black is winning).
  */
 export function evaluateBoard(chess: Chess): number {
   if (chess.isCheckmate()) {
     // Current player is mated
-    return chess.turn() === 'w' ? -100000 : 100000;
+    return chess.turn() === 'w' ? -MATE_SCORE : MATE_SCORE;
   }
-  if (chess.isDraw() || chess.isStalemate() || chess.isThreefoldRepetition()) {
+  // chess.js isDraw() covers stalemate, threefold repetition, insufficient material and the fifty-move rule
+  if (chess.isDraw()) {
     return 0;
   }
 
+  return staticEvaluation(chess);
+}
+
+/**
+ * Material + piece-square evaluation without any game-over detection.
+ * Cheap enough to be called on every leaf of the search tree.
+ */
+function staticEvaluation(chess: Chess): number {
   let totalEvaluation = 0;
   const board = chess.board();
   const endgame = isEndgame(chess);
@@ -174,9 +185,9 @@ export function evaluateBoard(chess: Chess): number {
       let value = PIECE_VALUES[type] || 0;
 
       // Positional bonus/penalty
-      // Black is mirrored vertically
+      // Black is mirrored vertically only (files are not mirrored, some tables are not left/right symmetric)
       const rEvaluated = color === 'w' ? r : 7 - r;
-      const cEvaluated = color === 'w' ? c : 7 - c;
+      const cEvaluated = c;
 
       let scorePST = 0;
       switch (type) {
@@ -220,17 +231,16 @@ export function evaluateBoard(chess: Chess): number {
 }
 
 /**
- * Order moves to optimize Alpha-Beta performance (captures first, checks first)
+ * Order moves to optimize Alpha-Beta performance (mates first, then captures, promotions and checks)
  */
-function orderMoves(chess: Chess, moves: string[]): string[] {
-  // Return sorted moves
+function orderMoves(moves: string[]): string[] {
+  // Return sorted moves, scored roughly from their SAN text
   return moves.map(m => {
-    // We parse moves using a temp copy to score them roughly
-    // Captures get highest priority
     let score = 0;
+    if (m.includes('#')) score += 10000; // Checkmate
     if (m.includes('x')) score += 100;
+    if (m.includes('=')) score += 80; // Promotion
     if (m.includes('+')) score += 50;
-    if (m.endsWith('=Q')) score += 80; // Promotion
     return { move: m, score };
   })
   .sort((a, b) => b.score - a.score)
@@ -245,19 +255,34 @@ function minimax(
   depth: number,
   alpha: number,
   beta: number,
-  isMaximizingPlayer: boolean
+  isMaximizingPlayer: boolean,
+  isRoot = false
 ): { score: number; move: string | null } {
-  // Base case
-  if (depth === 0 || chess.isGameOver()) {
-    return { score: evaluateBoard(chess), move: null };
+  // Drawn positions (inside the search only; the root position is always playable)
+  if (!isRoot && (chess.isInsufficientMaterial() || chess.isThreefoldRepetition())) {
+    return { score: 0, move: null };
+  }
+
+  // Leaf: only look for checkmate (cheap), otherwise use the static evaluation
+  if (depth === 0) {
+    if (chess.isCheckmate()) {
+      return { score: isMaximizingPlayer ? -MATE_SCORE : MATE_SCORE, move: null };
+    }
+    return { score: staticEvaluation(chess), move: null };
   }
 
   const movesText = chess.moves();
   if (movesText.length === 0) {
-    return { score: evaluateBoard(chess), move: null };
+    if (chess.inCheck()) {
+      // Side to move is checkmated. Adding the remaining depth makes the engine prefer faster mates
+      // (and delay being mated for as long as possible).
+      const mateScore = MATE_SCORE + depth;
+      return { score: isMaximizingPlayer ? -mateScore : mateScore, move: null };
+    }
+    return { score: 0, move: null }; // Stalemate
   }
 
-  const orderedMoves = orderMoves(chess, movesText);
+  const orderedMoves = orderMoves(movesText);
 
   let bestMove: string | null = null;
 
@@ -302,6 +327,19 @@ function minimax(
  * Returns the opening book move if match exists
  */
 export function getOpeningBookMove(chess: Chess, moveHistorySan: string[]): string | null {
+  // The book only applies when the current position was really reached from the standard
+  // starting position with exactly these moves (not after a FEN import / mid-game analysis).
+  const replay = new Chess();
+  try {
+    for (const san of moveHistorySan) replay.move(san);
+  } catch {
+    return null;
+  }
+  const positionKey = (c: Chess) => c.fen().split(' ').slice(0, 4).join(' ');
+  if (positionKey(replay) !== positionKey(chess)) {
+    return null;
+  }
+
   const historyStr = moveHistorySan.join(' ');
   const possibleNext = OPENING_BOOK[historyStr];
   if (possibleNext && possibleNext.length > 0) {
@@ -376,7 +414,7 @@ export function getBestMove(
   }
 
   // Run Alpha-Beta Minimax
-  const result = minimax(chess, depth, -Infinity, Infinity, isWhite);
+  const result = minimax(chess, depth, -Infinity, Infinity, isWhite, true);
 
   const finalMove = result.move || legalMoves[Math.floor(Math.random() * legalMoves.length)];
   return { move: finalMove, score: result.score };
